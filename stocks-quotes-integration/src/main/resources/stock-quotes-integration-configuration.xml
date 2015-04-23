@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:int="http://www.springframework.org/schema/integration"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:int-file="http://www.springframework.org/schema/integration/file"
+	xmlns:p="http://www.springframework.org/schema/p"
+	xmlns:util="http://www.springframework.org/schema/util"
+	xmlns:int-kafka="http://www.springframework.org/schema/integration/kafka"
+	xmlns:int-stream="http://www.springframework.org/schema/integration/stream"
+	xsi:schemaLocation="http://www.springframework.org/schema/integration/kafka http://www.springframework.org/schema/integration/kafka/spring-integration-kafka-1.1.xsd
+		http://www.springframework.org/schema/integration http://www.springframework.org/schema/integration/spring-integration-4.0.xsd
+		http://www.springframework.org/schema/integration/file http://www.springframework.org/schema/integration/file/spring-integration-file-4.0.xsd
+		http://www.springframework.org/schema/integration/stream http://www.springframework.org/schema/integration/stream/spring-integration-stream-4.0.xsd
+		http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+		http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util-4.0.xsd">
+
+	<int:poller default="true" fixed-delay="60" />
+	
+	<bean id="taskExecutor" class="org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor">
+		<property name="corePoolSize" value="150" />
+		<property name="maxPoolSize" value="200" />
+		<property name="queueCapacity" value="10000" />
+	</bean>
+
+	<int-file:inbound-channel-adapter id="symbolFileChannel"
+		directory="${input.directory}" filename-pattern="*-symbol*"
+		prevent-duplicates="false">
+		<int-file:nio-locker />
+		<int:poller fixed-delay="120000" />
+	</int-file:inbound-channel-adapter>
+
+	<int:channel id="batchingChannel" />
+	<int:channel id="symbolQuoteRequestChannel" />
+	<int:channel id="symbolSplitterChannel" />
+	<int:channel id="quotesChannel" />
+	<int:channel id="storageChannel" />
+
+	<!-- <int:service-activator id="quoteRequestServiceActivator" input-channel="batchingChannel" 
+		ref="quoteRequestService" method="getQuote"/> -->
+
+	<bean id="quoteRequestService" class="com.lng.stock.quotes.services.QuoteRequestServiceImpl" />
+	<bean id="restTemplate" class="org.springframework.web.client.RestTemplate" />
+	<bean id="stockOutboundFileNameGenerator" class="com.lng.stock.quotes.StockOutboundFileNameGenerator" />
+	<int-file:outbound-channel-adapter
+		id="quotesOutboundChannel" directory="${quotes.output.directory}"
+		channel="quotesChannel" filename-generator="stockOutboundFileNameGenerator" />
+
+	<int-file:inbound-channel-adapter id="quotesInboundChannel"
+		directory="${quotes.output.directory}" filename-pattern="stock-*.csv" />
+	
+	<int:publish-subscribe-channel id="inputToKafka" />
+
+	<int-kafka:outbound-channel-adapter
+		kafka-producer-context-ref="kafkaProducerContext" auto-startup="true"
+		channel="inputToKafka" topic="test" >
+		
+	</int-kafka:outbound-channel-adapter>
+
+	<int-kafka:producer-context id="kafkaProducerContext">
+		<int-kafka:producer-configurations>
+			<int-kafka:producer-configuration
+				topic="test" broker-list="localhost:9092" key-class-type="java.lang.String"
+				value-class-type="com.lng.stock.quotes.domain.MarketQuote"
+				compression-codec="default" 
+				async="true" />
+		</int-kafka:producer-configurations>
+	</int-kafka:producer-context>
+
+</beans>
